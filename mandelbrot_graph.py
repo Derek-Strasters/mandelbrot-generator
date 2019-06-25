@@ -22,6 +22,7 @@ class MandelbrotSet:
             self.colorizer = colorizer
         else:
             self.colorizer = self.default_color
+        self._dirty = True
 
     @property
     def dimensions(self):
@@ -76,7 +77,7 @@ class MandelbrotSet:
                                        top - i * y_pix_size)
 
     @staticmethod
-    @nb.vectorize([nb.float64(nb.complex128, nb.uint8, nb.float32, nb.float32)], target='cuda')
+    @nb.vectorize([nb.float64(nb.complex128, nb.uint16, nb.float32, nb.float32)], target='cuda')
     def _distance_to_set(starting_value, iter_count, escape_threshold, escape_squared):
         z = 0 + 0j
         c = starting_value
@@ -97,6 +98,7 @@ class MandelbrotSet:
                                                       self.escape_threshold, self._escape_squared)
         # Write to self.image
         self.colorizer(self._levels, self.image)
+        self._dirty = False
 
     @staticmethod
     @nb.guvectorize([(nb.float64[:, :], nb.uint8[:, :])], '(n,m)->(n,m)', target='cuda')
@@ -112,28 +114,26 @@ class MandelbrotSet:
             # Blue
             res[i][0] = brightness
 
-    def _set_attributes(self, **kwargs):
+    def _check_dirty(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+        if kwargs or self._dirty:
+            self.process_pixels()
 
     def show(self, **kwargs):
-        self._set_attributes(**kwargs)
-        self.process_pixels()
+        self._check_dirty(**kwargs)
         Image.fromarray(self.image).show()
 
     def image_at(self, **kwargs):
-        self._set_attributes(**kwargs)
-        self.process_pixels()
+        self._check_dirty(**kwargs)
         return self.image
 
     def bgr_image_at(self, **kwargs):
-        self._set_attributes(**kwargs)
-        self.process_pixels()
+        self._check_dirty(**kwargs)
         return array(self.image)[:, :, ::-1].copy()
 
     def save(self, name, **kwargs):
-        self._set_attributes(**kwargs)
-        self.process_pixels()
+        self._check_dirty(**kwargs)
         Image.fromarray(self.image).save(name)
         # TODO: add check if dirty before re-rendering
 
@@ -151,28 +151,21 @@ def fancy_color(intensity, res):
             # Blue
             res[i][0] = (255 - abs(255 - (brightness % 1024) / 2))
         else:
-            res[i][0] = 0
-            res[i][1] = 0
-            res[i][2] = 0
+            res[i][2] = 63
+            res[i][1] = 63
+            res[i][0] = 63
 
 
-def color_both_sides(intensity):
+@nb.guvectorize([(nb.float64[:, :], nb.uint8[:, :])], '(n,m)->(n,m)', target='cuda')
+def color_both_sides(intensity, res):
     """intensity should be between 0 and 1"""
-    brightness = intensity * 2048
-    if brightness > 0:
-        blue = (255 - abs(255 - brightness % 512))
-        red = (255 - abs(255 - (brightness % 1024) / 2))
-        green = (255 - abs(255 - (brightness % 2048) / 4))
-    elif brightness <= 0:
-
-        brightness = -brightness
-        green = (abs(255 - brightness % 512))
-        blue = (abs(255 - (brightness % 1024) / 2))
-        red = (abs(255 - (brightness % 2048) / 4))
-    else:
-        return 0, 0, 0
-    # average = ((red ** 2 + green ** 2 + blue ** 2) / 3) ** (1/2)
-    return int(red), int(green), int(blue)
+    for i in range(intensity.shape[0]):
+        brightness = intensity[i][0] * 2048
+        if brightness <= 0:
+            brightness = -brightness
+        res[i][2] = (255 - abs(255 - brightness % 512))
+        res[i][1] = (255 - abs(255 - (brightness % 2048) / 4))
+        res[i][0] = (255 - abs(255 - (brightness % 1024) / 2))
 
 
 def outline(intensity):
@@ -184,13 +177,15 @@ def outline(intensity):
         return 255, 255, 255
 
 
+# FIXME: I don't work on save
 def test_mandelbrot():
     # Width X Height
     dimensions = 1920, 1080
     start = time.time()
-    mandelbrot = MandelbrotSet(dimensions, iter_count=50, escape_threshold=2)
+    mandelbrot = MandelbrotSet(dimensions, iter_count=1023, escape_threshold=2)
     mandelbrot.colorizer = fancy_color
     mandelbrot.show()
+    # mandelbrot.show(center=(-0.747, 0.1), graph_range=0.003)
     # mandelbrot.show()
     # mandelbrot.show((-.75, 0.1), .004, colorizer=color_both_sides)
     # mandelbrot.dimensions = 500, 500
@@ -206,3 +201,5 @@ def test_mandelbrot():
 
 if __name__ == "__main__":
     test_mandelbrot()
+
+

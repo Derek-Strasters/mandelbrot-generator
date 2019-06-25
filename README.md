@@ -1,7 +1,11 @@
 # mandelbrot-generator
 Generates visual representations of the Mandelbrot set, including video.
 
-## uses gpu
-yay
 ## Install
-use anaconda distribution
+Use anaconda distribution.
+Install pillow, numpy, numba, and cvtools
+
+## uses gpu
+install cuda toolkit with
+    
+    conda install cudatoolkit
